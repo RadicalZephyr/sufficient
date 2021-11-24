@@ -1,7 +1,7 @@
 use std::error::Error as StdError;
-use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::{env, io};
 use structopt::StructOpt;
 use thiserror::Error;
 #[allow(unused_imports)]
@@ -43,6 +43,22 @@ pub struct Config {
 }
 
 fn run() -> Result<()> {
+    // Initialize logging, and log the "info" level for this crate only, unless
+    // the environment contains `RUST_LOG`.
+    let file_appender = tracing_appender::rolling::hourly("/var/log", "sufficient.log");
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    let mut base_config = tracing_subscriber::fmt();
+
+    if env::var("NO_ANSI").is_ok() {
+        base_config = base_config.with_ansi(false);
+    }
+    base_config.init();
+
+    // Create the configuration from the command line arguments. It
+    // includes the IP address and port to listen on and the path to use
+    // as the HTTP server's root directory.
+    let config = Config::from_args();
+
     Ok(())
 }
 
