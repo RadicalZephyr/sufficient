@@ -1,0 +1,17 @@
+[package]
+name = "sufficient"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+derive_more = "0.99.16"
+futures = "0.3.15"
+http = "0.2.4"
+hyper = "0.14.10"
+just = "0.9.8"
+structopt = "0.3.22"
+thiserror = "1.0.26"
+tokio = "1.8.1"
+tracing = "0.1.26"
