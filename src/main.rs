@@ -1,3 +1,11 @@
+use futures::future;
+use futures::stream::StreamExt;
+use futures::FutureExt;
+use http::header::{HeaderMap, HeaderValue};
+use http::status::StatusCode;
+use http::Uri;
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{header, Body, Method, Request, Response, Server};
 use std::error::Error as StdError;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -46,12 +54,14 @@ fn run() -> Result<()> {
     // Initialize logging, and log the "info" level for this crate only, unless
     // the environment contains `RUST_LOG`.
     let file_appender = tracing_appender::rolling::hourly("/var/log", "sufficient.log");
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     let mut base_config = tracing_subscriber::fmt();
 
     if env::var("NO_ANSI").is_ok() {
         base_config = base_config.with_ansi(false);
     }
+    let base_config = base_config.with_writer(non_blocking);
+
     base_config.init();
 
     // Create the configuration from the command line arguments. It
@@ -59,7 +69,52 @@ fn run() -> Result<()> {
     // as the HTTP server's root directory.
     let config = Config::from_args();
 
+    // Display the configuration to be helpful
+    info!("sufficient {}", env!("CARGO_PKG_VERSION"));
+    info!("addr: http://{}", config.addr);
+    info!("root dir: {}", config.root_dir.display());
+
+    // Create the MakeService object that creates a new Hyper service for every
+    // connection. Both these closures need to return a Future of Result, and we
+    // use two different mechanisms to achieve that.
+    let make_service = make_service_fn(|_| {
+        let config = config.clone();
+
+        let service = service_fn(move |req| {
+            let config = config.clone();
+
+            // Handle the request, returning a Future of Response,
+            // and map it to a Future of Result of Response.
+            serve(config, req).map(Ok::<_, Error>)
+        });
+
+        // Convert the concrete (non-future) service function to a Future of Result.
+        future::ok::<_, Error>(service)
+    });
+
+    // Create a Hyper Server, binding to an address, and use
+    // our service builder.
+    let server = Server::bind(&config.addr).serve(make_service);
+
+    // Create a Tokio runtime and block on Hyper forever.
+    let rt = Runtime::new()?;
+    rt.block_on(server)?;
+
     Ok(())
+}
+
+/// Create an HTTP Response future for each Request.
+///
+/// Errors are turned into an appropriate HTTP error response, and never
+/// propagated upward for hyper to deal with.
+async fn serve(config: Config, req: Request<Body>) -> Response<Body> {
+    // Serve the requested file.
+    let resp = serve_or_error(config, req).await;
+
+    // Transform internal errors to error responses.
+    let resp = transform_error(resp);
+
+    resp
 }
 
 /// A custom `Result` typedef
